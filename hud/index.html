@@ -1,0 +1,172 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; connect-src http://127.0.0.1:8765" />
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden;
+    font-family: -apple-system, "SF Pro Text", sans-serif; user-select: none; }
+  #wrap { position: absolute; right: 8px; bottom: 8px; display: flex; align-items: flex-end;
+    flex-direction: row-reverse; gap: 10px; }
+  #orb { width: 120px; height: 120px; cursor: pointer; flex: none; }
+  #bubble { max-width: 260px; padding: 10px 12px; border-radius: 14px;
+    background: rgba(8, 16, 28, 0.82); border: 1px solid rgba(80, 200, 255, 0.35);
+    box-shadow: 0 0 18px rgba(54, 198, 255, 0.18); color: #d8f3ff;
+    backdrop-filter: blur(10px); transition: opacity .35s, transform .35s;
+    margin-bottom: 14px; }
+  #bubble.hidden { opacity: 0; transform: translateX(12px); pointer-events: none; }
+  #label { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--c, #36c6ff);
+    display: flex; justify-content: space-between; gap: 8px; }
+  #jobs { color: #b388ff; }
+  #heard { font-size: 12px; font-style: italic; color: #8fb6c9; margin-top: 4px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  #reply { font-size: 13px; line-height: 1.35; margin-top: 4px;
+    display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="orb" width="240" height="240"></canvas>
+  <div id="bubble" class="hidden">
+    <div id="label"><span id="state">idle</span><span id="jobs"></span></div>
+    <div id="heard"></div>
+    <div id="reply"></div>
+  </div>
+</div>
+<script>
+const API = "http://127.0.0.1:8765";
+const COLORS = {
+  offline: [110, 110, 120], idle: [54, 198, 255], listening: [60, 230, 255],
+  transcribing: [255, 179, 71], thinking: [179, 136, 255], working: [179, 136, 255],
+  speaking: [77, 255, 195], confirm: [255, 96, 96],
+};
+const LABELS = { offline: "offline — daemon down", idle: "jarvis", listening: "listening",
+  transcribing: "transcribing", thinking: "thinking", working: "working", speaking: "speaking", confirm: "say confirm or cancel" };
+
+let st = { state: "offline", level: 0, last: {}, running_jobs: [] };
+let lastEventTs = 0, smoothLevel = 0, col = [...COLORS.offline];
+
+async function poll() {
+  try {
+    const r = await fetch(API + "/status", { cache: "no-store" });
+    st = await r.json();
+  } catch { st = { state: "offline", level: 0, last: st.last || {}, running_jobs: [] }; }
+  render();
+  setTimeout(poll, 100);
+}
+
+const bubble = document.getElementById("bubble");
+function render() {
+  const s = st.state;
+  document.documentElement.style.setProperty("--c", `rgb(${COLORS[s] || COLORS.idle})`);
+  document.getElementById("state").textContent = LABELS[s] || s;
+  const n = (st.running_jobs || []).length;
+  document.getElementById("jobs").textContent = n ? `${n} task${n > 1 ? "s" : ""} running` : "";
+  const last = st.last || {};
+  if (last.ts && last.ts !== lastEventTs) lastEventTs = last.ts;
+  const heard = s === "listening" ? "…" : (st.last_heard || last.heard || "");
+  document.getElementById("heard").textContent = heard ? `“${heard}”` : "";
+  document.getElementById("reply").textContent =
+    s === "listening" || s === "transcribing" ? "" : (last.reply || "");
+  const active = s !== "idle" || n > 0;
+  const fresh = lastEventTs && Date.now() / 1000 - lastEventTs < 12;
+  bubble.classList.toggle("hidden", !(active || fresh || hovering) || s === "offline" && !hovering);
+}
+
+// ---- orb animation ----
+const cv = document.getElementById("orb"), ctx = cv.getContext("2d");
+const CX = 120, CY = 120;
+let t = 0;
+function frame() {
+  t += 1 / 60;
+  const s = st.state, target = COLORS[s] || COLORS.idle;
+  col = col.map((v, i) => v + (target[i] - v) * 0.12);
+  smoothLevel += (Math.min(1, (st.level || 0) * 18) - smoothLevel) * 0.3;
+  const c = (a) => `rgba(${col[0] | 0},${col[1] | 0},${col[2] | 0},${a})`;
+  const busy = ["thinking", "transcribing", "working", "confirm"].includes(s);
+  const speed = s === "offline" ? 0.15 : busy ? 2.4 : s === "listening" ? 1.2 : 0.5;
+  const breathe = s === "offline" ? 0 : Math.sin(t * (busy ? 4 : 1.6)) * 0.5 + 0.5;
+  const speak = s === "speaking" ? (Math.sin(t * 13) * Math.sin(t * 7.3)) * 0.5 + 0.5 : 0;
+  const pulse = s === "listening" ? smoothLevel : speak * 0.7;
+
+  ctx.clearRect(0, 0, 240, 240);
+  // outer glow
+  const g = ctx.createRadialGradient(CX, CY, 10, CX, CY, 118);
+  g.addColorStop(0, c(0.35 + 0.25 * pulse));
+  g.addColorStop(0.45, c(0.10 + 0.08 * breathe));
+  g.addColorStop(1, c(0));
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(CX, CY, 118, 0, Math.PI * 2); ctx.fill();
+
+  // rings of arc segments
+  const rings = [
+    { r: 92 + pulse * 14, segs: 3, w: 3, dir: 1, len: 0.55 },
+    { r: 76 + pulse * 8, segs: 6, w: 2, dir: -1.6, len: 0.35 },
+    { r: 62, segs: 12, w: 4, dir: 0.7, len: 0.22 },
+  ];
+  rings.forEach((rg, i) => {
+    ctx.strokeStyle = c(0.85 - i * 0.18);
+    ctx.lineWidth = rg.w;
+    ctx.lineCap = "round";
+    const step = (Math.PI * 2) / rg.segs;
+    for (let k = 0; k < rg.segs; k++) {
+      const a = k * step + t * speed * rg.dir;
+      ctx.beginPath(); ctx.arc(CX, CY, rg.r, a, a + step * rg.len); ctx.stroke();
+    }
+  });
+
+  // listening / speaking waveform ring
+  if (s === "listening" || s === "speaking") {
+    ctx.strokeStyle = c(0.9); ctx.lineWidth = 2; ctx.beginPath();
+    for (let k = 0; k <= 96; k++) {
+      const a = (k / 96) * Math.PI * 2;
+      const amp = (s === "listening" ? smoothLevel * 16 : speak * 10) *
+        (0.5 + 0.5 * Math.sin(a * 6 + t * 9) * Math.sin(a * 3 - t * 5));
+      const r = 48 + amp;
+      const x = CX + r * Math.cos(a), y = CY + r * Math.sin(a);
+      k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // core
+  const cg = ctx.createRadialGradient(CX, CY, 2, CX, CY, 40);
+  cg.addColorStop(0, `rgba(255,255,255,${0.85 * (s === "offline" ? 0.3 : 1)})`);
+  cg.addColorStop(0.35, c(0.85));
+  cg.addColorStop(1, c(0));
+  ctx.fillStyle = cg;
+  ctx.beginPath(); ctx.arc(CX, CY, 28 + breathe * 4 + pulse * 10, 0, Math.PI * 2); ctx.fill();
+
+  requestAnimationFrame(frame);
+}
+
+// ---- interaction: click = toggle, drag = move, right-click = menu ----
+const orb = document.getElementById("orb");
+let hovering = false, down = null, moved = false;
+for (const el of [orb, bubble]) {
+  el.addEventListener("mouseenter", () => { hovering = true; window.hud.mouse(true); render(); });
+  el.addEventListener("mouseleave", () => { if (!down) { hovering = false; window.hud.mouse(false); render(); } });
+}
+orb.addEventListener("mousedown", (e) => {
+  if (e.button !== 0) return;
+  down = { x: e.screenX, y: e.screenY }; moved = false;
+  window.hud.dragStart(e.screenX, e.screenY);
+});
+window.addEventListener("mousemove", (e) => {
+  if (!down) return;
+  if (Math.abs(e.screenX - down.x) + Math.abs(e.screenY - down.y) > 4) moved = true;
+  if (moved) window.hud.dragMove(e.screenX, e.screenY);
+});
+window.addEventListener("mouseup", (e) => {
+  if (!down) return;
+  window.hud.dragEnd();
+  if (!moved && e.button === 0) window.hud.toggle();
+  down = null;
+});
+orb.addEventListener("contextmenu", (e) => { e.preventDefault(); window.hud.menu(); });
+
+poll();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

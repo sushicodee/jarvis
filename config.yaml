@@ -1,0 +1,181 @@
+# Public defaults. Your real setup goes in config.local.yaml (gitignored), merged over this file.
+# Jarvis config. Paths may use ~. Override location with JARVIS_CONFIG=/path/to/config.yaml
+
+server:
+  host: 127.0.0.1
+  port: 8765
+
+audio:
+  sample_rate: 16000
+  max_seconds: 60
+  # >0: stop recording automatically after this much silence following speech.
+  # 0: push-to-talk only (press hotkey again to stop).
+  silence_seconds: 1.2
+  silence_rms: 0.012
+  earcons: true
+
+stt:
+  backend: mlx            # mlx | whisper-cli
+  mlx_model: mlx-community/whisper-large-v3-turbo
+  cli_model: small.en     # used by whisper-cli backend (~/.local/bin/whisper)
+  language: en
+
+jev:
+  env_file: ~/.config/jarvis/jev.env   # OPENROUTER_API_KEY=... (never commit keys)
+  base: https://openrouter.ai/api
+  model: typesafe/jev-1.13
+  min_confidence: 0.5
+
+tier2:
+  model: typesafe/jev-router
+  max_tokens: 400
+  system: >-
+    You are Jarvis, a concise voice assistant for Sushicodee. Reply in one to three
+    short spoken sentences. No markdown, no lists, no URLs.
+
+tier3:
+  claude_bin: claude
+  timeout_seconds: 1200
+  permission_mode: default
+  # Always denied (settings files are not loaded, so the usual .env deny rules must be repeated here).
+  deny_tools:
+    - "Read(**/.env)"
+    - "Read(**/.env.*)"
+    - "Read(**/secrets/**)"
+    - "Read(**/*credentials*)"
+    - "Bash(rm:*)"
+    - "Bash(mv:*)"
+    - "Bash(git worktree remove:*)"
+  default_context: vault
+  # Skill/agent folders loaded as local plugins (only skills/ and agents/ are linked; never hooks).
+  # Skill/agent folders loaded as local plugins (only skills/ and agents/ are linked; never hooks).
+  skill_plugins:
+    user: ~/.claude
+  # MCP servers to pass to every context, resolved by name from your Claude Code config
+  # (~/.claude.json user scope, project scopes listed in mcp_project_dirs, ~/.claude/settings.json).
+  base_mcp_servers: []
+  mcp_project_dirs: []
+  skills_hint: ""          # extra routing guidance appended to the skills instructions
+  contexts:
+    vault:
+      cwd: ~/Documents/Obsidian Vault
+      pattern: "\\b(note|notes|vault|journal|review|plan|learning)\\b"
+      description: personal knowledge, notes, plans, reviews, learning, the Obsidian vault
+      allowed_tools:
+        - Skill
+        - Agent
+        - Read
+        - Glob
+        - Grep
+        - WebSearch
+        - WebFetch
+        - "Edit(~/Documents/Obsidian Vault/**)"
+        - "Write(~/Documents/Obsidian Vault/**)"
+    personal:
+      cwd: ~
+      pattern: "\\b(agent|agents|script|automation|side project)\\b"
+      description: personal automation, scripts, the user's own tooling and side projects
+      allowed_tools:
+        - Skill
+        - Agent
+        - Read
+        - Glob
+        - Grep
+        - WebSearch
+        - WebFetch
+    # Add work contexts in config.local.yaml (gitignored), e.g.:
+    # work:
+    #   cwd: ~/code/my-company
+    #   pattern: "\\b(ticket|jira|pr|release)\\b"
+    #   description: day-job tickets, repos and PRs
+    #   allowed_tools: [Skill, Agent, Read, Glob, Grep, "Bash(git status:*)"]
+    #   mcp_servers: [some-read-only-server]
+
+tts:
+  engine: kokoro          # kokoro | say
+  voice: bm_george
+  lang: en-gb
+  speed: 1.1
+  say_voice: Daniel
+  max_chars: 600
+  model_dir: ~/.cache/jarvis/kokoro
+
+vault:
+  path: ~/Documents/Obsidian Vault
+  log_dir: jarvis
+  output_dir: outputs/jarvis
+  inbox_dir: inbox
+  profile: jarvis/profile.md   # typed facts about you, injected into tier 2/3 prompts
+
+# Tier 1: fixed actions, no LLM. Jev picks one by description.
+# `run` is a shell command. `speak_output: true` reads stdout aloud.
+# Built-ins (handled in code): take_note, reset_session, stop_speaking.
+commands:
+  open_obsidian:
+    description: open the Obsidian app
+    match: ["open obsidian"]
+    run: open -a Obsidian
+    say: Opening Obsidian.
+  open_terminal:
+    description: open a terminal window
+    match: ["open terminal", "open a terminal", "open iterm"]
+    run: open -a iTerm
+    say: Terminal's up.
+  what_time:
+    description: ask what time it is right now
+    match: ["what time is it", "what's the time", "whats the time", "current time"]
+    run: date '+%-I:%M %p'
+    speak_output: true
+  what_date:
+    description: ask what today's date or day of the week is
+    match: ["what's the date", "whats the date", "what is the date", "what day is it", "today's date"]
+    run: date '+%A, %B %-d'
+    speak_output: true
+  music_toggle:
+    description: play, pause, or resume music on Spotify
+    match: ["pause the music", "play music", "play the music", "resume music", "pause music", "stop the music"]
+    run: osascript -e 'tell application "Spotify" to playpause'
+  next_track:
+    description: skip to the next song
+    match: ["next song", "next track", "skip song", "skip this song"]
+    run: osascript -e 'tell application "Spotify" to next track'
+  volume_up:
+    description: turn the system volume up
+    match: ["volume up", "louder", "turn it up"]
+    run: osascript -e 'set volume output volume ((output volume of (get volume settings)) + 15)'
+  volume_down:
+    description: turn the system volume down
+    match: ["volume down", "quieter", "turn it down"]
+    run: osascript -e 'set volume output volume ((output volume of (get volume settings)) - 15)'
+  sleep_display:
+    description: lock the screen or put the display to sleep
+    match: ["lock the screen", "lock screen", "sleep display"]
+    run: pmset displaysleepnow
+  take_note:
+    description: quickly jot down, remember, or capture a note, idea, or reminder for later
+    match: ["take a note", "note that", "remind me", "jot down", "remember that", "make a note"]
+  reset_session:
+    description: start a new conversation, forget the current session, start fresh
+    match: ["start fresh", "new session", "reset session", "new conversation", "forget that"]
+  stop_speaking:
+    description: stop talking, be quiet, cancel, never mind
+    match: ["stop talking", "be quiet", "shut up", "never mind", "nevermind", "cancel that"]
+
+# Disk housekeeping (src/jarvis/disk.py). Never run by a model: Jarvis reads the plan aloud,
+# asks you to confirm, and only a spoken "confirm" executes it. Anything else cancels.
+disk:
+  ssd_mount: /Volumes/Sushicodee
+  ssd_dest: /Volumes/Sushicodee/MacOffload    # moved paths keep their layout under here
+  worktree_roots: [~/code]
+  # A worktree is deletable when it is clean and its HEAD is in one of these refs
+  # or its branch has a merged PR.
+  merged_base_refs: ["refs/remotes/origin/main", "refs/remotes/origin/master"]
+  check_merged_prs: true
+  confirm_ttl_seconds: 120
+  answer_listen_seconds: 8   # mic opens after the question; closes if you say nothing
+  resolver_model: sonnet     # works out which paths "move X to the SSD" means (read-only tools)
+  protected:
+    - ~/Library
+    - ~/Applications
+    - ~/Documents/Obsidian Vault
+    - ~/code

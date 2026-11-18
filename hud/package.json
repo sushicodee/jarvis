@@ -1,0 +1,9 @@
+{
+  "name": "jarvis-hud",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Floating always-on-top HUD for the Jarvis voice daemon",
+  "main": "main.js",
+  "scripts": { "start": "electron ." },
+  "devDependencies": { "electron": "^33.0.0" }
+}
